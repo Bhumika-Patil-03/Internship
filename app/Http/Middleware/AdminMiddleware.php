@@ -12,14 +12,12 @@ class AdminMiddleware
     /**
      * Handle an incoming request.
      */
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next)
     {
-        // Check if user is logged in AND if they are an admin (1)
         if (Auth::check() && Auth::user()->is_admin == 1) {
             return $next($request);
         }
 
-        // If not admin, block access
-        abort(403, 'Unauthorized access.');
+        return redirect('/')->with('error', 'Access denied. Admins only.');
     }
 }

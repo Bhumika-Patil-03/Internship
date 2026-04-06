@@ -6,97 +6,91 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Category;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\File;
 
 class ProductController extends Controller
 {
-    // 1. List Products (with Search & Category Filter)
-    public function index(Request $request)
+    private function checkAdmin() 
     {
-        $query = Product::with(['category', 'subcategory']);
-
-        if ($request->has('search')) {
-            $query->where('name', 'like', '%' . $request->search . '%');
+        if (!Auth::check() || Auth::user()->is_admin != 1) {
+            abort(403, 'Unauthorized access.');
         }
-
-        if ($request->has('category_id')) {
-            $query->where('category_id', $request->category_id);
-        }
-
-        $products = $query->paginate(5); 
-
-        return view('admin.products.index', compact('products'));
     }
 
-    // 2. SHOW CREATE FORM (This was missing!)
-    public function create()
+    public function create() 
     {
-        // Get only main categories (where parent_id is null)
-        $categories = Category::whereNull('parent_id')->get();
+        $this->checkAdmin();
+        $categories = Category::all();
         return view('admin.products.create', compact('categories'));
     }
 
-    // 3. Save New Product
-    public function store(Request $request)
+    public function store(Request $request) 
     {
-        $request->validate([
-            'name' => 'required|unique:products,name|max:255',
-            'category_id' => 'required|exists:categories,id',
-            'price' => 'required|numeric|min:0',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg|max:2048'
+        $this->checkAdmin();
+        
+        $validatedData = $request->validate([
+            'name'        => 'required|string|max:255',
+            'category_id' => 'required',
+            'price'       => 'required|numeric|min:0',
+            'description' => 'nullable|string', 
+            'image'       => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
         ]);
 
-        $data = $request->all();
-
         if ($request->hasFile('image')) {
-            $data['image'] = $request->file('image')->store('products', 'public');
+            $imageName = time() . '.' . $request->image->extension();  
+            // Changed to 'uploads/products' to avoid folder/route conflict
+            $request->image->move(public_path('uploads/products'), $imageName);
+            $validatedData['image'] = 'uploads/products/' . $imageName;
         }
 
-        Product::create($data);
+        Product::create($validatedData);
 
-        return redirect()->route('products.index')->with('success', 'Product Added Successfully!');
+        return redirect()->route('products.index')->with('success', 'Product added successfully!');
     }
 
-    // 4. Show Edit Form
-    public function edit(Product $product)
+    public function edit($id) 
     {
-        $categories = Category::whereNull('parent_id')->get();
+        $this->checkAdmin();
+        $product = Product::findOrFail($id);
+        $categories = Category::all();
         return view('admin.products.edit', compact('product', 'categories'));
     }
 
-    // 5. Update Product
-    public function update(Request $request, Product $product)
+    public function update(Request $request, $id) 
     {
-        $request->validate([
-            'name' => 'required|max:255|unique:products,name,' . $product->id,
-            'category_id' => 'required|exists:categories,id',
-            'price' => 'required|numeric',
+        $this->checkAdmin();
+        $product = Product::findOrFail($id);
+
+        $validatedData = $request->validate([
+            'name'        => 'required|string|max:255',
+            'category_id' => 'required',
+            'price'       => 'required|numeric',
+            'description' => 'nullable|string',
+            'image'       => 'nullable|image|max:2048',
         ]);
 
-        $data = $request->all();
-
         if ($request->hasFile('image')) {
-            if($product->image) { Storage::disk('public')->delete($product->image); }
-            $data['image'] = $request->file('image')->store('products', 'public');
+            if (File::exists(public_path($product->image))) {
+                File::delete(public_path($product->image));
+            }
+            $imageName = time() . '.' . $request->image->extension();  
+            $request->image->move(public_path('uploads/products'), $imageName);
+            $validatedData['image'] = 'uploads/products/' . $imageName;
         }
 
-        $product->update($data);
-
-        return redirect()->route('products.index')->with('success', 'Product Updated Successfully!');
+        $product->update($validatedData);
+        return redirect()->route('products.index')->with('success', 'Product updated!');
     }
 
-    // 6. Delete Product
-    public function destroy(Product $product)
+    public function destroy($id) 
     {
-        if($product->image) { Storage::disk('public')->delete($product->image); }
+        $this->checkAdmin();
+        $product = Product::findOrFail($id);
+        if (File::exists(public_path($product->image))) {
+            File::delete(public_path($product->image));
+        }
         $product->delete();
-        return redirect()->route('products.index')->with('success', 'Product Deleted!');
-    }
-
-    // 7. AJAX logic for Dependent Dropdown
-    public function getSubcategories($parentId)
-    {
-        $subcategories = Category::where('parent_id', $parentId)->get();
-        return response()->json($subcategories);
+        return redirect()->route('products.index')->with('success', 'Product deleted!');
     }
 }
